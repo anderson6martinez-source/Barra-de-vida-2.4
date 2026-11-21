@@ -95,7 +95,7 @@ namespace Game
         double ultimoAtaqueJugador = -100;
         ComponentCreature jugadorAtacante;
 
-        static readonly string[] NombresCampeon = { "Rojo", "Amarillo", "Verde", "Azul", "Morado", "Dorado" };
+        static readonly string[] NombresCampeon = { "Rojo", "Amarillo", "Verde", "Azul", "Morado", "Dorado", "Negro", "Blanco", "Naranja", "Jefe" };
         static readonly Color[] ColoresCampeonUI =
         {
             new Color((byte)235, (byte)60, (byte)60, (byte)255),
@@ -103,7 +103,11 @@ namespace Game
             new Color((byte)80, (byte)255, (byte)80, (byte)255),
             new Color((byte)90, (byte)140, (byte)255, (byte)255),
             new Color((byte)190, (byte)90, (byte)240, (byte)255),
-            new Color((byte)255, (byte)205, (byte)70, (byte)255)
+            new Color((byte)255, (byte)205, (byte)70, (byte)255),
+            new Color((byte)170, (byte)170, (byte)185, (byte)255),  // negro (gris claro para que se lea)
+            new Color((byte)235, (byte)245, (byte)255, (byte)255),  // blanco
+            new Color((byte)255, (byte)140, (byte)40, (byte)255),   // naranja
+            new Color((byte)255, (byte)90, (byte)90, (byte)255)     // jefe
         };
         static readonly List<System.Reflection.MethodInfo> metodosTipo = new List<System.Reflection.MethodInfo>();
         static bool tipoBuscado;
@@ -472,7 +476,7 @@ namespace Game
     {
         // ---- ajustes ----
         const float Multiplicador = 1.7f;          // velocidad al correr (1.7 = 70% mas rapido)
-        const float MultiplicadorStamina = 1.7f;   // gasto de stamina al correr (1.7 = 70% mas)
+        const float GastoCorrerPorSegundo = 0.05f; // stamina extra que gasta correr por segundo mientras te mueves (0.05 = 5%)
         const string TextoApagado = "Correr";
         const string TextoEncendido = "Correr: ON";
         const bool MostrarBarraStamina = true;
@@ -484,6 +488,13 @@ namespace Game
         const float BonusMin = 1f;                 // dano extra minimo por golpe con el buff activo
         const float BonusMax = 3f;                 // dano extra maximo (sale al azar en pasos de 0.5: 1, 1.5, 2, 2.5, 3)
         static readonly System.Random azar = new System.Random();
+        // ---- esquive y golpe fuerte ----
+        const float CostoEsquive = 0.20f;          // stamina que gasta el esquive (0.20 = 20%)
+        const float ImpulsoEsquive = 8f;           // fuerza del salto hacia adelante
+        const double EsperaEsquive = 1.5;          // segundos entre esquives
+        const float CostoFuerte = 0.40f;           // stamina que gasta el golpe fuerte (0.40 = 40%)
+        const float MultiplicadorFuerte = 2f;      // el golpe fuerte hace x2 de dano
+        const float AltoBotonChico = 40f;
         const float CostoStaminaGolpe = 0.16f;     // stamina que gasta cada golpe (0.16 = 16%)
         const float AltoBarra = 6f;                // grosor de la barra de stamina
         const float SeparacionBarra = 4f;          // espacio entre la barra y los corazones
@@ -500,6 +511,12 @@ namespace Game
             public bool Buff;
             public double UltimoToqueBuff;
             public double UltimoAviso;
+            public BevelledButtonWidget BotonEsquive;
+            public BevelledButtonWidget BotonFuerte;
+            public bool Fuerte;
+            public double UltimoToqueEsquive;
+            public double UltimoToqueFuerte;
+            public double UltimoEsquive;
             public CanvasWidget Caja;
             public RectangleWidget Fondo;
             public RectangleWidget Relleno;
@@ -567,7 +584,7 @@ namespace Game
                     ? 0.008f * caminar
                     : (0.07f + 0.006f * k) * caminar;
 
-                vital.Stamina -= (MultiplicadorStamina - 1f) * movimiento * dt;
+                vital.Stamina -= GastoCorrerPorSegundo * dt;
             }
             catch (Exception ex)
             {
@@ -624,6 +641,18 @@ namespace Game
                     e.BotonBuff.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
                     e.Panel.AddChildren(e.BotonBuff);
 
+                    e.BotonEsquive = new BevelledButtonWidget();
+                    e.BotonEsquive.Text = "Esquive";
+                    e.BotonEsquive.Size = new Vector2(96f, AltoBotonChico);
+                    e.BotonEsquive.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
+                    e.Panel.AddChildren(e.BotonEsquive);
+
+                    e.BotonFuerte = new BevelledButtonWidget();
+                    e.BotonFuerte.Text = "Fuerte";
+                    e.BotonFuerte.Size = new Vector2(96f, AltoBotonChico);
+                    e.BotonFuerte.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
+                    e.Panel.AddChildren(e.BotonFuerte);
+
                     e.Etiqueta = new LabelWidget();
                     e.Etiqueta.Text = "Stamina";
                     e.Etiqueta.HorizontalAlignment = WidgetAlignment.Center;
@@ -661,6 +690,18 @@ namespace Game
                     e.UltimoToqueBuff = ahora;
                     e.Buff = !e.Buff;
                     e.BotonBuff.Text = e.Buff ? TextoBuffEncendido : TextoBuffApagado;
+                }
+
+                if (e.BotonFuerte.IsClicked && ahora - e.UltimoToqueFuerte > 0.25)
+                {
+                    e.UltimoToqueFuerte = ahora;
+                    e.Fuerte = !e.Fuerte;
+                    e.BotonFuerte.Text = e.Fuerte ? "Fuerte: ON" : "Fuerte";
+                }
+                if (e.BotonEsquive.IsClicked && ahora - e.UltimoToqueEsquive > 0.25)
+                {
+                    e.UltimoToqueEsquive = ahora;
+                    Esquivar(componentGui, jugador, e, ahora);
                 }
 
                 // porcentaje de stamina en texto (el texto del juego siempre se refresca)
@@ -712,7 +753,32 @@ namespace Game
                 (b.Max.Y - area.Min.Y) / escala + SeparacionBoton * 0.5f);
         }
 
+        // esquive: salto rapido hacia adelante, gasta stamina y tiene espera
+        void Esquivar(ComponentGui gui, ComponentPlayer jugador, Estado e, double ahora)
+        {
+            if (ahora - e.UltimoEsquive < EsperaEsquive) return;
+            ComponentBody cuerpo = jugador.ComponentBody;
+            if (cuerpo == null) return;
+            ComponentVitalStats vital = jugador.ComponentVitalStats;
+            if (vital != null && SupervivenciaActiva(jugador))
+            {
+                if (vital.Stamina < CostoEsquive)
+                {
+                    gui.DisplaySmallMessage("Sin stamina para esquivar", Color.White, true, false);
+                    return;
+                }
+                vital.Stamina -= CostoEsquive;
+            }
+            Vector3 adelante = cuerpo.Matrix.Forward;
+            adelante.Y = 0f;
+            if (adelante.Length() < 0.01f) return;
+            adelante = Vector3.Normalize(adelante);
+            cuerpo.Velocity = cuerpo.Velocity + adelante * ImpulsoEsquive + new Vector3(0f, 1.5f, 0f);
+            e.UltimoEsquive = ahora;
+        }
+
         // buff: cada golpe cuerpo a cuerpo del jugador hace +BonusDanio y gasta CostoStaminaGolpe de stamina.
+        // golpe fuerte: el siguiente golpe hace x2 de dano y gasta CostoFuerte (se apaga solo al usarlo).
         // sin stamina suficiente (en supervivencia) el golpe sale normal, sin bonus y sin gasto.
         public override void ProcessAttackment(Attackment attackment)
         {
@@ -724,25 +790,48 @@ namespace Game
                 if (jugador == null) return;
                 ComponentGui gui = jugador.Entity.FindComponent<ComponentGui>(false);
                 Estado e;
-                if (gui == null || !estados.TryGetValue(gui, out e) || !e.Buff) return;
+                if (gui == null || !estados.TryGetValue(gui, out e) || (!e.Buff && !e.Fuerte)) return;
 
                 ComponentVitalStats vital = jugador.ComponentVitalStats;
-                if (vital != null && SupervivenciaActiva(jugador))
+                bool gasta = vital != null && SupervivenciaActiva(jugador);
+                double ahora = Time.RealTime;
+
+                if (e.Buff)
                 {
-                    if (vital.Stamina < CostoStaminaGolpe)
+                    if (gasta && vital.Stamina < CostoStaminaGolpe)
                     {
-                        double ahora = Time.RealTime;
                         if (ahora - e.UltimoAviso > 2.0)
                         {
                             e.UltimoAviso = ahora;
                             gui.DisplaySmallMessage("Sin stamina para el buff", Color.White, true, false);
                         }
-                        return;
                     }
-                    vital.Stamina -= CostoStaminaGolpe;
+                    else
+                    {
+                        if (gasta) vital.Stamina -= CostoStaminaGolpe;
+                        int pasos = (int)Math.Round((BonusMax - BonusMin) / 0.5f);
+                        attackment.AttackPower += BonusMin + 0.5f * azar.Next(pasos + 1);
+                    }
                 }
-                int pasos = (int)Math.Round((BonusMax - BonusMin) / 0.5f);
-                attackment.AttackPower += BonusMin + 0.5f * azar.Next(pasos + 1);
+
+                if (e.Fuerte)
+                {
+                    if (gasta && vital.Stamina < CostoFuerte)
+                    {
+                        if (ahora - e.UltimoAviso > 2.0)
+                        {
+                            e.UltimoAviso = ahora;
+                            gui.DisplaySmallMessage("Sin stamina para el golpe fuerte", Color.White, true, false);
+                        }
+                    }
+                    else
+                    {
+                        if (gasta) vital.Stamina -= CostoFuerte;
+                        attackment.AttackPower *= MultiplicadorFuerte;
+                        e.Fuerte = false; // se usa una sola vez
+                        e.BotonFuerte.Text = "Fuerte";
+                    }
+                }
             }
             catch (Exception ex)
             {
