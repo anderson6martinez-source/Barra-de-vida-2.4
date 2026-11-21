@@ -36,6 +36,8 @@ namespace Game
         public override void __ModInitialize()
         {
             ModsManager.RegisterHook("InitializeCreatureTypes", this);
+            ModsManager.RegisterHook("GuiDraw", this);
+            ModsManager.RegisterHook("ProcessAttackment", this);
             // GuiDraw se dibuja en el orden 9, ANTES que el agua (orden 100) y esta tapa la barra.
             // RenderModels se llama por cada orden de modelos (-10000, 1, 99, 201): usamos el
             // ultimo (201), que va despues del agua.
@@ -49,10 +51,173 @@ namespace Game
         {
             creaturas = subsystemCreatureSpawn;
             vidaPrevia.Clear();
+            paneles.Clear();
             ultimoGolpe.Clear();
         }
 
         static bool desactivado;
+
+        // ---- panel lateral del animal golpeado ----
+        const float SegundosPanel = 30f;    // el panel dura 30 s tras el ultimo golpe a ese animal
+        const float AnchoPanel = 120f;
+        const float AltoPanel = 42f;
+
+        class Panel
+        {
+            public CanvasWidget Caja;
+            public LabelWidget Nombre;
+            public LabelWidget Vida;
+            public ComponentCreature Objetivo;
+            public double Fin;
+            public string UltimoTexto;
+        }
+
+        readonly Dictionary<ComponentGui, Panel> paneles = new Dictionary<ComponentGui, Panel>();
+        static bool panelDesactivado;
+        static System.Reflection.MemberInfo miembroObjetivo;
+        static bool miembroBuscado;
+
+        // saca la criatura golpeada del Attackment (el campo "Target" cambia de tipo segun la version)
+        static ComponentCreature CriaturaDe(object ataque)
+        {
+            if (ataque == null) return null;
+            if (!miembroBuscado)
+            {
+                miembroBuscado = true;
+                System.Reflection.BindingFlags f = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+                miembroObjetivo = (System.Reflection.MemberInfo)ataque.GetType().GetProperty("Target", f)
+                    ?? (System.Reflection.MemberInfo)ataque.GetType().GetField("Target", f);
+            }
+            object o = null;
+            System.Reflection.PropertyInfo p = miembroObjetivo as System.Reflection.PropertyInfo;
+            System.Reflection.FieldInfo fi = miembroObjetivo as System.Reflection.FieldInfo;
+            if (p != null) o = p.GetValue(ataque, null);
+            else if (fi != null) o = fi.GetValue(ataque);
+            return CriaturaDe(o as Component);
+        }
+
+        static ComponentCreature CriaturaDe(Component comp)
+        {
+            if (comp == null) return null;
+            ComponentCreature c = comp as ComponentCreature;
+            return c ?? comp.Entity.FindComponent<ComponentCreature>(false);
+        }
+
+        void RegistrarGolpe(ComponentCreature atacante, ComponentCreature objetivo)
+        {
+            if (panelDesactivado || atacante == null || objetivo == null) return;
+            if (!(atacante is ComponentPlayer) || objetivo is ComponentPlayer) return;
+            ComponentGui gui = atacante.Entity.FindComponent<ComponentGui>(false);
+            if (gui == null) return;
+            Panel p;
+            if (!paneles.TryGetValue(gui, out p))
+            {
+                p = new Panel();
+                paneles[gui] = p;
+            }
+            p.Objetivo = objetivo;
+            p.Fin = Time.RealTime + SegundosPanel;
+            p.UltimoTexto = null;
+        }
+
+        public override void GuiDraw(ComponentGui componentGui, Camera camera, int drawOrder)
+        {
+            if (panelDesactivado || componentGui == null) return;
+            try
+            {
+                Panel p;
+                if (!paneles.TryGetValue(componentGui, out p)) return;
+                ContainerWidget contenedor = componentGui.ControlsContainerWidget;
+                if (contenedor == null) return;
+
+                if (p.Caja == null)
+                {
+                    // al reaparecer el jugador el contenedor es el mismo: quita paneles viejos
+                    List<ComponentGui> viejos = new List<ComponentGui>();
+                    foreach (KeyValuePair<ComponentGui, Panel> par in paneles)
+                    {
+                        if (par.Key == componentGui || par.Value.Caja == null) continue;
+                        if (par.Value.Caja.ParentWidget == contenedor)
+                        {
+                            contenedor.RemoveChildren(par.Value.Caja);
+                            viejos.Add(par.Key);
+                        }
+                    }
+                    for (int i = 0; i < viejos.Count; i++) paneles.Remove(viejos[i]);
+
+                    p.Caja = new CanvasWidget();
+                    p.Caja.Size = new Vector2(AnchoPanel, AltoPanel);
+                    p.Caja.HorizontalAlignment = WidgetAlignment.Near;
+                    p.Caja.VerticalAlignment = WidgetAlignment.Center;
+                    p.Caja.Margin = new Vector2(8f, 0f);
+                    p.Caja.IsHitTestVisible = false;
+
+                    RectangleWidget fondo = new RectangleWidget();
+                    fondo.FillColor = new Color((byte)0, (byte)0, (byte)0, (byte)150);
+                    fondo.OutlineColor = new Color((byte)255, (byte)255, (byte)255, (byte)90);
+                    fondo.OutlineThickness = 1f;
+                    p.Caja.AddChildren(fondo);
+
+                    StackPanelWidget col = new StackPanelWidget();
+                    col.Direction = LayoutDirection.Vertical;
+                    col.HorizontalAlignment = WidgetAlignment.Center;
+                    col.VerticalAlignment = WidgetAlignment.Center;
+                    p.Nombre = new LabelWidget();
+                    p.Nombre.FontScale = 0.7f;
+                    p.Nombre.Color = Color.White;
+                    p.Nombre.HorizontalAlignment = WidgetAlignment.Center;
+                    p.Vida = new LabelWidget();
+                    p.Vida.FontScale = 0.7f;
+                    p.Vida.HorizontalAlignment = WidgetAlignment.Center;
+                    col.AddChildren(p.Nombre);
+                    col.AddChildren(p.Vida);
+                    p.Caja.AddChildren(col);
+                    contenedor.AddChildren(p.Caja);
+                }
+
+                ComponentCreature c = p.Objetivo;
+                bool visible = c != null && c.ComponentHealth != null && c.ComponentHealth.Health > 0f
+                    && Time.RealTime < p.Fin;
+                p.Caja.IsVisible = visible;
+                if (!visible) return;
+
+                float v = MathUtils.Clamp(c.ComponentHealth.Health, 0f, 1f);
+                float max = c.ComponentHealth.AttackResilience;
+                string vidaTxt = max > 0f
+                    ? (v * max).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " / " + max.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                    : (v * 100f).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+                if (vidaTxt != p.UltimoTexto)
+                {
+                    p.UltimoTexto = vidaTxt;
+                    string nombre = c.DisplayName;
+                    p.Nombre.Text = string.IsNullOrEmpty(nombre) ? "?" : nombre;
+                    p.Vida.Text = vidaTxt;
+                    Color colorVida = ColorVida(v, (byte)255);
+                    p.Vida.Color = colorVida;
+                }
+            }
+            catch (Exception ex)
+            {
+                panelDesactivado = true;
+                Log.Warning("Panel de vida desactivado por error: " + ex);
+            }
+        }
+
+        // el golpe del jugador a una criatura abre/renueva el panel lateral
+        public override void ProcessAttackment(Attackment attackment)
+        {
+            if (attackment == null || attackment.Attacker == null) return;
+            try
+            {
+                RegistrarGolpe(attackment.Attacker.FindComponent<ComponentCreature>(false), CriaturaDe((object)attackment));
+            }
+            catch (Exception ex)
+            {
+                panelDesactivado = true;
+                Log.Warning("Panel de vida desactivado por error: " + ex);
+            }
+        }
+
 
         public override void RenderModels(SubsystemModelsRenderer subsystemModelsRenderer, Camera camera,
             int drawOrder, bool skippedByOtherMods, out bool skip)
