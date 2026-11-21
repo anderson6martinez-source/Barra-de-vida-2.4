@@ -138,8 +138,8 @@ namespace Game
                 {
                     float max = c.ComponentHealth.AttackResilience;
                     string etiqueta = max > 0f
-                        ? ((int)Math.Ceiling(v * max)).ToString() + "/" + ((int)Math.Round(max)).ToString()
-                        : ((int)Math.Ceiling(v * 100f)).ToString() + "%";
+                        ? (v * max).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "/" + max.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                        : (v * 100f).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%";
                     // nombre de la criatura delante de los numeros: "Vaca 15/25"
                     string nombre = c.DisplayName;
                     if (!string.IsNullOrEmpty(nombre)) etiqueta = nombre + "  " + etiqueta;
@@ -175,7 +175,7 @@ namespace Game
     // Boton "Correr": un boton en la pantalla (lado derecho) que alterna correr.
     //  - Correr = velocidad x1.7 y gasto de stamina x1.7 (solo el movimiento; el salto gasta igual).
     //  - Barra de stamina encima de los corazones y el hambre.
-    //  - Boton "Buff": cada golpe cuerpo a cuerpo hace +3 de dano y gasta 10% de stamina.
+    //  - Boton "Buff": cada golpe cuerpo a cuerpo hace +3 de dano y gasta 16% de stamina.
     public class CorrerLoader : ModLoader
     {
         // ---- ajustes ----
@@ -189,8 +189,10 @@ namespace Game
         // ---- buff de dano ----
         const string TextoBuffApagado = "Buff";
         const string TextoBuffEncendido = "Buff: ON";
-        const float BonusDanio = 3f;               // dano extra por golpe con el buff activo
-        const float CostoStaminaGolpe = 0.10f;     // stamina que gasta cada golpe (0.10 = 10%)
+        const float BonusMin = 1f;                 // dano extra minimo por golpe con el buff activo
+        const float BonusMax = 3f;                 // dano extra maximo (sale al azar en pasos de 0.5: 1, 1.5, 2, 2.5, 3)
+        static readonly System.Random azar = new System.Random();
+        const float CostoStaminaGolpe = 0.16f;     // stamina que gasta cada golpe (0.16 = 16%)
         const float AltoBarra = 6f;                // grosor de la barra de stamina
         const float SeparacionBarra = 4f;          // espacio entre la barra y los corazones
         const float AnchoMinimoBarra = 80f;        // ancho minimo de la barra
@@ -209,8 +211,9 @@ namespace Game
             public CanvasWidget Caja;
             public RectangleWidget Fondo;
             public RectangleWidget Relleno;
-            public int UltimoAncho = -1;    // ancho (px) con el que se armo el fondo
-            public int UltimoRelleno = -1;  // ancho (px) con el que se armo el relleno
+            public int UltimoAncho = -1;    // ancho (px) con el que se armo la barra
+            public StackPanelWidget Fila;   // fila de segmentos de la barra
+            public RectangleWidget[] Seg;   // segmentos (tamano fijo; solo cambia su color)
         }
 
         readonly Dictionary<ComponentGui, Estado> estados = new Dictionary<ComponentGui, Estado>();
@@ -318,18 +321,7 @@ namespace Game
                         e.Caja.HorizontalAlignment = WidgetAlignment.Near;
                         e.Caja.VerticalAlignment = WidgetAlignment.Near;
                         e.Caja.IsHitTestVisible = false;
-                        e.Fondo = new RectangleWidget();
-                        e.Fondo.HorizontalAlignment = WidgetAlignment.Near;
-                        e.Fondo.VerticalAlignment = WidgetAlignment.Near;
-                        e.Fondo.FillColor = new Color((byte)0, (byte)0, (byte)0, (byte)150);
-                        e.Fondo.OutlineColor = new Color((byte)255, (byte)255, (byte)255, (byte)90);
-                        e.Fondo.OutlineThickness = 1f;
-                        e.Relleno = new RectangleWidget();
-                        e.Relleno.HorizontalAlignment = WidgetAlignment.Near;
-                        e.Relleno.VerticalAlignment = WidgetAlignment.Near;
-                        e.Relleno.OutlineColor = Color.Transparent;
-                        e.Caja.AddChildren(e.Fondo);
-                        e.Caja.AddChildren(e.Relleno);
+                        // el fondo y los segmentos se arman en ActualizarBarra (ArmarBarra)
                         e.Caja.IsVisible = false;
                         componentGui.ControlsContainerWidget.AddChildren(e.Caja);
                     }
@@ -422,7 +414,8 @@ namespace Game
                     }
                     vital.Stamina -= CostoStaminaGolpe;
                 }
-                attackment.AttackPower += BonusDanio;
+                int pasos = (int)Math.Round((BonusMax - BonusMin) / 0.5f);
+                attackment.AttackPower += BonusMin + 0.5f * azar.Next(pasos + 1);
             }
             catch (Exception ex)
             {
@@ -471,31 +464,46 @@ namespace Game
             e.Caja.Margin = new Vector2(x, y);
             e.Caja.Size = new Vector2(ancho, AltoBarra);
 
-            // RectangleWidget.Size es una propiedad automatica: al cambiarla el juego NO recalcula el
-            // layout y el relleno se quedaba con el ancho del primer cuadro. Por eso se recrean los
-            // rectangulos cuando cambia su ancho en pixeles.
+            // Los segmentos tienen tamano fijo (no dependen de recalcular el layout): cada cuadro solo
+            // se cambia el COLOR de cada segmento, que el juego lee en cada dibujado.
             int anchoPx = (int)Math.Round(ancho);
-            int rellenoPx = (int)Math.Round(ancho * v);
-            Color color = ColorStamina(v);
-            if (anchoPx != e.UltimoAncho)
+            if (anchoPx != e.UltimoAncho || e.Seg == null)
             {
-                e.Caja.RemoveChildren(e.Relleno);
-                e.Caja.RemoveChildren(e.Fondo);
-                e.Fondo = NuevoRect(ancho, AltoBarra,
-                    new Color((byte)0, (byte)0, (byte)0, (byte)150), new Color((byte)255, (byte)255, (byte)255, (byte)90), 1f);
-                e.Caja.AddChildren(e.Fondo);
-                e.Relleno = null;
+                ArmarBarra(e, ancho);
                 e.UltimoAncho = anchoPx;
-                e.UltimoRelleno = -1;
             }
-            if (rellenoPx != e.UltimoRelleno || e.Relleno == null)
+            int n = e.Seg.Length;
+            int encendidos = (int)Math.Ceiling(v * n - 0.01f);
+            Color color = ColorStamina(v);
+            Color apagado = new Color((byte)40, (byte)40, (byte)40, (byte)90);
+            for (int i = 0; i < n; i++)
+                e.Seg[i].FillColor = i < encendidos ? color : apagado;
+        }
+
+        const int Segmentos = 20;
+
+        // arma (o rearma si cambia el ancho) el fondo y la fila de segmentos dentro de la caja
+        static void ArmarBarra(Estado e, float ancho)
+        {
+            if (e.Fila != null) e.Caja.RemoveChildren(e.Fila);
+            if (e.Fondo != null) e.Caja.RemoveChildren(e.Fondo);
+            e.Fondo = NuevoRect(ancho, AltoBarra,
+                new Color((byte)0, (byte)0, (byte)0, (byte)150), new Color((byte)255, (byte)255, (byte)255, (byte)90), 1f);
+            e.Caja.AddChildren(e.Fondo);
+
+            e.Fila = new StackPanelWidget();
+            e.Fila.Direction = LayoutDirection.Horizontal;
+            e.Fila.HorizontalAlignment = WidgetAlignment.Near;
+            e.Fila.VerticalAlignment = WidgetAlignment.Near;
+            e.Seg = new RectangleWidget[Segmentos];
+            float w = ancho / Segmentos;
+            for (int i = 0; i < Segmentos; i++)
             {
-                if (e.Relleno != null) e.Caja.RemoveChildren(e.Relleno);
-                e.Relleno = NuevoRect(ancho * v, AltoBarra, color, Color.Transparent, 0f);
-                e.Caja.AddChildren(e.Relleno);
-                e.UltimoRelleno = rellenoPx;
+                RectangleWidget s = NuevoRect(w, AltoBarra, new Color((byte)40, (byte)40, (byte)40, (byte)90), Color.Transparent, 0f);
+                e.Seg[i] = s;
+                e.Fila.AddChildren(s);
             }
-            e.Relleno.FillColor = color;
+            e.Caja.AddChildren(e.Fila);
         }
 
         static RectangleWidget NuevoRect(float ancho, float alto, Color relleno, Color borde, float grosorBorde)
