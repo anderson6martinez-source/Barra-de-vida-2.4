@@ -209,6 +209,8 @@ namespace Game
             public CanvasWidget Caja;
             public RectangleWidget Fondo;
             public RectangleWidget Relleno;
+            public int UltimoAncho = -1;    // ancho (px) con el que se armo el fondo
+            public int UltimoRelleno = -1;  // ancho (px) con el que se armo el relleno
         }
 
         readonly Dictionary<ComponentGui, Estado> estados = new Dictionary<ComponentGui, Estado>();
@@ -468,9 +470,44 @@ namespace Game
             float v = MathUtils.Clamp(vital.Stamina, 0f, 1f);
             e.Caja.Margin = new Vector2(x, y);
             e.Caja.Size = new Vector2(ancho, AltoBarra);
-            e.Fondo.Size = new Vector2(ancho, AltoBarra);
-            e.Relleno.Size = new Vector2(ancho * v, AltoBarra);
-            e.Relleno.FillColor = ColorStamina(v);
+
+            // RectangleWidget.Size es una propiedad automatica: al cambiarla el juego NO recalcula el
+            // layout y el relleno se quedaba con el ancho del primer cuadro. Por eso se recrean los
+            // rectangulos cuando cambia su ancho en pixeles.
+            int anchoPx = (int)Math.Round(ancho);
+            int rellenoPx = (int)Math.Round(ancho * v);
+            Color color = ColorStamina(v);
+            if (anchoPx != e.UltimoAncho)
+            {
+                e.Caja.RemoveChildren(e.Relleno);
+                e.Caja.RemoveChildren(e.Fondo);
+                e.Fondo = NuevoRect(ancho, AltoBarra,
+                    new Color((byte)0, (byte)0, (byte)0, (byte)150), new Color((byte)255, (byte)255, (byte)255, (byte)90), 1f);
+                e.Caja.AddChildren(e.Fondo);
+                e.Relleno = null;
+                e.UltimoAncho = anchoPx;
+                e.UltimoRelleno = -1;
+            }
+            if (rellenoPx != e.UltimoRelleno || e.Relleno == null)
+            {
+                if (e.Relleno != null) e.Caja.RemoveChildren(e.Relleno);
+                e.Relleno = NuevoRect(ancho * v, AltoBarra, color, Color.Transparent, 0f);
+                e.Caja.AddChildren(e.Relleno);
+                e.UltimoRelleno = rellenoPx;
+            }
+            e.Relleno.FillColor = color;
+        }
+
+        static RectangleWidget NuevoRect(float ancho, float alto, Color relleno, Color borde, float grosorBorde)
+        {
+            RectangleWidget r = new RectangleWidget();
+            r.HorizontalAlignment = WidgetAlignment.Near;
+            r.VerticalAlignment = WidgetAlignment.Near;
+            r.Size = new Vector2(ancho, alto);
+            r.FillColor = relleno;
+            r.OutlineColor = borde;
+            r.OutlineThickness = grosorBorde;
+            return r;
         }
 
         static Color ColorStamina(float v)
