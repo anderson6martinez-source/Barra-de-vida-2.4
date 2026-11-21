@@ -186,6 +186,7 @@ namespace Game
 
         class Estado
         {
+            public StackPanelWidget Panel;
             public BevelledButtonWidget Boton;
             public bool Corriendo;
             public float VelocidadBase;
@@ -277,21 +278,25 @@ namespace Game
                 if (!estados.TryGetValue(componentGui, out e))
                 {
                     e = new Estado();
+                    e.Panel = new StackPanelWidget();
+                    e.Panel.Direction = LayoutDirection.Vertical;
+                    e.Panel.HorizontalAlignment = WidgetAlignment.Far;
+                    e.Panel.VerticalAlignment = WidgetAlignment.Center;
+                    e.Panel.Margin = new Vector2(8f, 0f);
+
                     e.Boton = new BevelledButtonWidget();
                     e.Boton.Text = TextoApagado;
-                    e.Boton.Size = new Vector2(96f, 48f);
-                    e.Boton.HorizontalAlignment = WidgetAlignment.Far;
-                    e.Boton.VerticalAlignment = WidgetAlignment.Center;
-                    e.Boton.Margin = new Vector2(8f, 0f);
-                    componentGui.ControlsContainerWidget.AddChildren(e.Boton);
+                    e.Boton.Size = new Vector2(96f, AltoBoton);
+                    e.Boton.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
+                    e.Panel.AddChildren(e.Boton);
 
                     e.BotonBuff = new BevelledButtonWidget();
                     e.BotonBuff.Text = TextoBuffApagado;
                     e.BotonBuff.Size = new Vector2(96f, AltoBoton);
-                    e.BotonBuff.HorizontalAlignment = WidgetAlignment.Far;
-                    e.BotonBuff.VerticalAlignment = WidgetAlignment.Near;
-                    e.BotonBuff.Margin = new Vector2(8f, 300f);
-                    componentGui.ControlsContainerWidget.AddChildren(e.BotonBuff);
+                    e.BotonBuff.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
+                    e.Panel.AddChildren(e.BotonBuff);
+
+                    componentGui.ControlsContainerWidget.AddChildren(e.Panel);
 
                     if (MostrarBarraStamina)
                     {
@@ -346,24 +351,32 @@ namespace Game
             }
         }
 
-        // pone los botones en la columna derecha, justo debajo del boton de agacharse:
-        // primero "Correr" y debajo "Buff" (si no encuentra el de agacharse, se quedan donde estan)
+        // busca el boton de agacharse (en cualquier parte de la pantalla del jugador)
+        static ButtonWidget BuscarAgachar(ComponentGui gui)
+        {
+            ButtonWidget b = null;
+            ContainerWidget contenedor = gui.ControlsContainerWidget;
+            ContainerWidget raiz = contenedor.RootWidget as ContainerWidget;
+            if (raiz != null) b = raiz.Children.Find<ButtonWidget>("SneakButton", false);
+            if (b == null) b = contenedor.Children.Find<ButtonWidget>("SneakButton", false);
+            return b;
+        }
+
+        // pone el panel (Correr + Buff) en la columna derecha, justo debajo del boton de agacharse
+        // (si no lo encuentra, se queda a media altura en el borde derecho)
         void ColocarBoton(ComponentGui gui, Estado e)
         {
             ContainerWidget contenedor = gui.ControlsContainerWidget;
-            ButtonWidget agachar = contenedor.Children.Find<ButtonWidget>("SneakButton", false);
+            ButtonWidget agachar = BuscarAgachar(gui);
             if (agachar == null || !agachar.IsVisibleGlobal) return;
             float escala = contenedor.GlobalScale > 0.0001f ? contenedor.GlobalScale : 1f;
             BoundingRectangle area = contenedor.GlobalBounds;
             BoundingRectangle b = agachar.GlobalBounds;
-            float x = MathUtils.Max((area.Max.X - b.Max.X) / escala, 0f);
-            float y = (b.Max.Y - area.Min.Y) / escala + SeparacionBoton;
-            e.Boton.HorizontalAlignment = WidgetAlignment.Far;
-            e.Boton.VerticalAlignment = WidgetAlignment.Near;
-            e.Boton.Margin = new Vector2(x, y);
-            e.BotonBuff.HorizontalAlignment = WidgetAlignment.Far;
-            e.BotonBuff.VerticalAlignment = WidgetAlignment.Near;
-            e.BotonBuff.Margin = new Vector2(x, y + AltoBoton + SeparacionBoton);
+            e.Panel.HorizontalAlignment = WidgetAlignment.Far;
+            e.Panel.VerticalAlignment = WidgetAlignment.Near;
+            e.Panel.Margin = new Vector2(
+                MathUtils.Max((area.Max.X - b.Max.X) / escala, 0f),
+                (b.Max.Y - area.Min.Y) / escala + SeparacionBoton * 0.5f);
         }
 
         // buff: cada golpe cuerpo a cuerpo del jugador hace +BonusDanio y gasta CostoStaminaGolpe de stamina.
