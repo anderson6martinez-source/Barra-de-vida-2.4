@@ -36,7 +36,10 @@ namespace Game
         public override void __ModInitialize()
         {
             ModsManager.RegisterHook("InitializeCreatureTypes", this);
-            ModsManager.RegisterHook("GuiDraw", this);
+            // GuiDraw se dibuja en el orden 9, ANTES que el agua (orden 100) y esta tapa la barra.
+            // RenderModels se llama por cada orden de modelos (-10000, 1, 99, 201): usamos el
+            // ultimo (201), que va despues del agua.
+            ModsManager.RegisterHook("RenderModels", this);
         }
 
         // el juego llama a este hook una vez por cada mundo que se carga
@@ -51,9 +54,14 @@ namespace Game
 
         static bool desactivado;
 
-        public override void GuiDraw(ComponentGui componentGui, Camera camera, int drawOrder)
+        public override void RenderModels(SubsystemModelsRenderer subsystemModelsRenderer, Camera camera,
+            int drawOrder, bool skippedByOtherMods, out bool skip)
         {
-            if (desactivado || creaturas == null || camera == null) return;
+            skip = false;
+            if (desactivado || creaturas == null || camera == null || subsystemModelsRenderer == null) return;
+            // solo en la ultima pasada de modelos (despues del agua)
+            int[] ordenes = subsystemModelsRenderer.DrawOrders;
+            if (ordenes == null || ordenes.Length == 0 || drawOrder != ordenes[ordenes.Length - 1]) return;
             try
             {
                 Dibujar(camera);
@@ -132,6 +140,9 @@ namespace Game
                     string etiqueta = max > 0f
                         ? ((int)Math.Ceiling(v * max)).ToString() + "/" + ((int)Math.Round(max)).ToString()
                         : ((int)Math.Ceiling(v * 100f)).ToString() + "%";
+                    // nombre de la criatura delante de los numeros: "Vaca 15/25"
+                    string nombre = c.DisplayName;
+                    if (!string.IsNullOrEmpty(nombre)) etiqueta = nombre + "  " + etiqueta;
                     texto.QueueText(etiqueta, centro + arriba * (h + 0.05f),
                         derecha * TamanoTexto, -arriba * TamanoTexto, new Color((byte)255, (byte)255, (byte)255, alfa),
                         TextAnchor.HorizontalCenter | TextAnchor.Bottom);
@@ -209,7 +220,8 @@ namespace Game
             ModsManager.RegisterHook("InitializeCreatureTypes", this);
             ModsManager.RegisterHook("GuiDraw", this);
             ModsManager.RegisterHook("GuiUpdate", this);
-            ModsManager.RegisterHook("AttackBody", this);
+            // en esta version del juego el golpe pasa por ProcessAttackment (el hook AttackBody ya no se llama)
+            ModsManager.RegisterHook("ProcessAttackment", this);
         }
 
         public override void InitializeCreatureTypes(
@@ -381,17 +393,17 @@ namespace Game
 
         // buff: cada golpe cuerpo a cuerpo del jugador hace +BonusDanio y gasta CostoStaminaGolpe de stamina.
         // sin stamina suficiente (en supervivencia) el golpe sale normal, sin bonus y sin gasto.
-        public override bool AttackBody(ComponentBody target, ComponentCreature attacker,
-            Vector3 hitPoint, Vector3 hitDirection, ref float attackPower, bool isMeleeAttack)
+        public override void ProcessAttackment(Attackment attackment)
         {
-            if (desactivado || attacker == null || !isMeleeAttack || attackPower <= 0f) return false;
+            if (desactivado || attackment == null || !(attackment is MeleeAttackment) || attackment.AttackPower <= 0f) return;
             try
             {
-                ComponentPlayer jugador = attacker as ComponentPlayer;
-                if (jugador == null) return false;
+                if (attackment.Attacker == null) return;
+                ComponentPlayer jugador = attackment.Attacker.FindComponent<ComponentPlayer>(false);
+                if (jugador == null) return;
                 ComponentGui gui = jugador.Entity.FindComponent<ComponentGui>(false);
                 Estado e;
-                if (gui == null || !estados.TryGetValue(gui, out e) || !e.Buff) return false;
+                if (gui == null || !estados.TryGetValue(gui, out e) || !e.Buff) return;
 
                 ComponentVitalStats vital = jugador.ComponentVitalStats;
                 if (vital != null && SupervivenciaActiva(jugador))
@@ -404,18 +416,17 @@ namespace Game
                             e.UltimoAviso = ahora;
                             gui.DisplaySmallMessage("Sin stamina para el buff", Color.White, true, false);
                         }
-                        return false;
+                        return;
                     }
                     vital.Stamina -= CostoStaminaGolpe;
                 }
-                attackPower += BonusDanio;
+                attackment.AttackPower += BonusDanio;
             }
             catch (Exception ex)
             {
                 desactivado = true;
                 Log.Warning("Buff de dano desactivado por error: " + ex);
             }
-            return false;
         }
 
         // la stamina solo se gasta en supervivencia (igual que el juego)
