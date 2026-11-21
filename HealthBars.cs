@@ -211,6 +211,8 @@ namespace Game
             public CanvasWidget Caja;
             public RectangleWidget Fondo;
             public RectangleWidget Relleno;
+            public LabelWidget Etiqueta;    // texto: Stamina 73%
+            public int UltimoPct = -1;
             public int UltimoAncho = -1;    // ancho (px) con el que se armo la barra
             public StackPanelWidget Fila;   // fila de segmentos de la barra
             public RectangleWidget[] Seg;   // segmentos (tamano fijo; solo cambia su color)
@@ -313,6 +315,11 @@ namespace Game
                     e.BotonBuff.Margin = new Vector2(0f, SeparacionBoton * 0.5f);
                     e.Panel.AddChildren(e.BotonBuff);
 
+                    e.Etiqueta = new LabelWidget();
+                    e.Etiqueta.Text = "Stamina";
+                    e.Etiqueta.HorizontalAlignment = WidgetAlignment.Center;
+                    e.Panel.AddChildren(e.Etiqueta);
+
                     componentGui.ControlsContainerWidget.AddChildren(e.Panel);
 
                     if (MostrarBarraStamina)
@@ -345,6 +352,17 @@ namespace Game
                     e.UltimoToqueBuff = ahora;
                     e.Buff = !e.Buff;
                     e.BotonBuff.Text = e.Buff ? TextoBuffEncendido : TextoBuffApagado;
+                }
+
+                // porcentaje de stamina en texto (el texto del juego siempre se refresca)
+                if (jugador.ComponentVitalStats != null && e.Etiqueta != null)
+                {
+                    int pct = (int)Math.Round(MathUtils.Clamp(jugador.ComponentVitalStats.Stamina, 0f, 1f) * 100f);
+                    if (pct != e.UltimoPct)
+                    {
+                        e.UltimoPct = pct;
+                        e.Etiqueta.Text = "Stamina " + pct + "%";
+                    }
                 }
 
                 ColocarBoton(componentGui, e);
