@@ -90,6 +90,8 @@ namespace Game
 
         readonly Dictionary<ComponentGui, Panel> paneles = new Dictionary<ComponentGui, Panel>();
         static bool panelDesactivado;
+        double ataquePendiente = -100;
+        ComponentCreature jugadorPendiente;
         static System.Reflection.MemberInfo miembroObjetivo;
         static bool miembroBuscado;
 
@@ -141,23 +143,61 @@ namespace Game
             catch { return -1; }
         }
 
-        // saca la criatura golpeada del Attackment (el campo "Target" cambia de tipo segun la version)
-        static ComponentCreature CriaturaDe(object ataque)
+        // convierte lo que sea (criatura, componente o entidad) en la criatura dueña
+        static ComponentCreature CriaturaDeObjeto(object o)
+        {
+            if (o == null) return null;
+            ComponentCreature cc = o as ComponentCreature;
+            if (cc != null) return cc;
+            Component comp = o as Component;
+            if (comp != null) return CriaturaDe(comp);
+            Entity ent = o as Entity;
+            if (ent != null) return ent.FindComponent<ComponentCreature>(false);
+            return null;
+        }
+
+        // saca la criatura golpeada del Attackment (el campo "Target" cambia de tipo segun la version:
+        // puede ser un componente o una entidad). Si "Target" no sirve, busca en todos los campos publicos
+        // alguna criatura distinta del atacante.
+        static ComponentCreature CriaturaDeAtaque(object ataque, ComponentCreature atacante)
         {
             if (ataque == null) return null;
+            System.Reflection.BindingFlags f = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
             if (!miembroBuscado)
             {
                 miembroBuscado = true;
-                System.Reflection.BindingFlags f = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
                 miembroObjetivo = (System.Reflection.MemberInfo)ataque.GetType().GetProperty("Target", f)
                     ?? (System.Reflection.MemberInfo)ataque.GetType().GetField("Target", f);
             }
             object o = null;
             System.Reflection.PropertyInfo p = miembroObjetivo as System.Reflection.PropertyInfo;
             System.Reflection.FieldInfo fi = miembroObjetivo as System.Reflection.FieldInfo;
-            if (p != null) o = p.GetValue(ataque, null);
-            else if (fi != null) o = fi.GetValue(ataque);
-            return CriaturaDe(o as Component);
+            try
+            {
+                if (p != null) o = p.GetValue(ataque, null);
+                else if (fi != null) o = fi.GetValue(ataque);
+            }
+            catch { o = null; }
+            ComponentCreature r = CriaturaDeObjeto(o);
+            if (r != null && r != atacante) return r;
+
+            // plan B
+            foreach (System.Reflection.PropertyInfo pi in ataque.GetType().GetProperties(f))
+            {
+                if (!pi.CanRead || pi.GetIndexParameters().Length > 0) continue;
+                object v;
+                try { v = pi.GetValue(ataque, null); } catch { continue; }
+                ComponentCreature c = CriaturaDeObjeto(v);
+                if (c != null && c != atacante) return c;
+            }
+            foreach (System.Reflection.FieldInfo fx in ataque.GetType().GetFields(f))
+            {
+                object v;
+                try { v = fx.GetValue(ataque); } catch { continue; }
+                ComponentCreature c = CriaturaDeObjeto(v);
+                if (c != null && c != atacante) return c;
+            }
+            return null;
         }
 
         static ComponentCreature CriaturaDe(Component comp)
@@ -331,7 +371,15 @@ namespace Game
             try
             {
                 ComponentCreature atq = attackment.Attacker.FindComponent<ComponentCreature>(false);
-                RegistrarGolpe(atq, CriaturaDe((object)attackment));
+                ComponentCreature objetivo = CriaturaDeAtaque((object)attackment, atq);
+                if (objetivo != null) RegistrarGolpe(atq, objetivo);
+                else if (atq is ComponentPlayer)
+                {
+                    // no se pudo leer el objetivo: la proxima criatura (la mas cercana al jugador) que
+                    // pierda vida en medio segundo se toma como la golpeada
+                    jugadorPendiente = atq;
+                    ataquePendiente = Time.RealTime;
+                }
             }
             catch (Exception ex)
             {
@@ -393,6 +441,8 @@ namespace Game
             }
 
             bool algo = false;
+            ComponentCreature mejorGolpeada = null;
+            float distMejor = 20f;
             foreach (ComponentCreature c in creaturas.Creatures)
             {
                 if (c == null || c.ComponentBody == null || c.ComponentHealth == null) continue;
@@ -405,6 +455,12 @@ namespace Game
                 if (vidaPrevia.TryGetValue(c, out anterior) && vida < anterior - 0.0001f)
                 {
                     ultimoGolpe[c] = ahora;
+                    if (jugadorPendiente != null && ahora - ataquePendiente < 0.5 && !(c is ComponentPlayer)
+                        && jugadorPendiente.ComponentBody != null)
+                    {
+                        float dist = Vector3.Distance(jugadorPendiente.ComponentBody.Position, c.ComponentBody.Position);
+                        if (dist < distMejor) { distMejor = dist; mejorGolpeada = c; }
+                    }
                 }
                 vidaPrevia[c] = vida;
                 double golpe;
@@ -441,6 +497,11 @@ namespace Game
                 algo = true;
             }
 
+            if (mejorGolpeada != null)
+            {
+                RegistrarGolpe(jugadorPendiente, mejorGolpeada);
+                jugadorPendiente = null;
+            }
             if (algo) renderizador.Flush(camera.ViewProjectionMatrix);
         }
 
