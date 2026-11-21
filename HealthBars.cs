@@ -1,4 +1,4 @@
-// Barra de vida sobre la cabeza de las criaturas. Survivalcraft API 1.9.
+// Barra de vida sobre la cabeza de las criaturas. Survivalcraft API 1.9 (juego 2.4).
 // Un solo archivo (igual que Zombies.cs): se compila en el mismo dll o en uno propio.
 //  - Solo se muestra si la criatura tiene la vida por debajo del maximo.
 //  - Verde -> amarillo -> rojo segun la vida. Se oculta lejos y detras de bloques.
@@ -22,6 +22,7 @@ namespace Game
         const bool MostrarAlJugador = false;
         const byte AlfaNormal = 128;        // 50% transparente
         const float SegundosOpaca = 3f;     // tras un golpe, 100% visible este tiempo
+        const bool VerATravesDeBloques = true; // true: el agua y los bloques no tapan la barra
         const bool MostrarNumeros = true;   // vida en numeros: 15/25
         const float TamanoTexto = 0.011f;   // tamano de los numeros
 
@@ -48,9 +49,25 @@ namespace Game
             ultimoGolpe.Clear();
         }
 
+        static bool desactivado;
+
         public override void GuiDraw(ComponentGui componentGui, Camera camera, int drawOrder)
         {
-            if (creaturas == null || camera == null) return;
+            if (desactivado || creaturas == null || camera == null) return;
+            try
+            {
+                Dibujar(camera);
+            }
+            catch (Exception e)
+            {
+                // si algo falla, el mod se apaga solo en vez de dejar la pantalla en negro
+                desactivado = true;
+                Log.Warning("BarraVida desactivada por error: " + e);
+            }
+        }
+
+        void Dibujar(Camera camera)
+        {
 
             Matrix vista = camera.ViewMatrix;
             Vector3 derecha = new Vector3(vista.M11, vista.M21, vista.M31);
@@ -58,14 +75,14 @@ namespace Game
             Vector3 ojo = camera.ViewPosition;
 
             FlatBatch3D lote = renderizador.FlatBatch(
-                100, DepthStencilState.DepthRead, RasterizerState.CullNone, BlendState.AlphaBlend);
+                100, (VerATravesDeBloques ? DepthStencilState.None : DepthStencilState.DepthRead), RasterizerState.CullNone, BlendState.AlphaBlend);
 
             FontBatch3D texto = null;
             if (MostrarNumeros)
             {
                 if (fuente == null) fuente = ContentManager.Get<BitmapFont>("Fonts/Pericles");
                 texto = renderizador.FontBatch(
-                    fuente, 101, DepthStencilState.DepthRead, RasterizerState.CullNone,
+                    fuente, 101, (VerATravesDeBloques ? DepthStencilState.None : DepthStencilState.DepthRead), RasterizerState.CullNone,
                     BlendState.AlphaBlend, SamplerState.LinearClamp);
             }
 
@@ -141,6 +158,81 @@ namespace Game
             byte r = (byte)(255f * MathUtils.Clamp(2f - 2f * v, 0f, 1f));
             byte g = (byte)(255f * MathUtils.Clamp(2f * v, 0f, 1f));
             return new Color(r, g, (byte)30, alfa);
+        }
+    }
+
+    // Boton "Correr": un boton en la pantalla (lado derecho) que alterna correr.
+    public class CorrerLoader : ModLoader
+    {
+        // ---- ajustes ----
+        const float Multiplicador = 1.7f;   // velocidad al correr (1.7 = 70% mas rapido)
+        const string TextoApagado = "Correr";
+        const string TextoEncendido = "Correr: ON";
+
+        class Estado
+        {
+            public BevelledButtonWidget Boton;
+            public bool Corriendo;
+            public float VelocidadBase;
+            public double UltimoToque;
+        }
+
+        readonly Dictionary<ComponentGui, Estado> estados = new Dictionary<ComponentGui, Estado>();
+        static bool desactivado;
+
+        public override void __ModInitialize()
+        {
+            ModsManager.RegisterHook("InitializeCreatureTypes", this);
+            ModsManager.RegisterHook("GuiDraw", this);
+        }
+
+        public override void InitializeCreatureTypes(
+            SubsystemCreatureSpawn subsystemCreatureSpawn,
+            List<SubsystemCreatureSpawn.CreatureType> creatureTypes)
+        {
+            estados.Clear(); // mundo nuevo: se crean botones nuevos
+        }
+
+        public override void GuiDraw(ComponentGui componentGui, Camera camera, int drawOrder)
+        {
+            if (desactivado || componentGui == null) return;
+            try
+            {
+                ComponentPlayer jugador = componentGui.Entity.FindComponent<ComponentPlayer>(false);
+                if (jugador == null || jugador.ComponentLocomotion == null) return;
+                if (componentGui.ControlsContainerWidget == null) return;
+
+                Estado e;
+                if (!estados.TryGetValue(componentGui, out e))
+                {
+                    e = new Estado();
+                    e.Boton = new BevelledButtonWidget();
+                    e.Boton.Text = TextoApagado;
+                    e.Boton.Size = new Vector2(96f, 48f);
+                    e.Boton.HorizontalAlignment = WidgetAlignment.Far;
+                    e.Boton.VerticalAlignment = WidgetAlignment.Center;
+                    e.Boton.Margin = new Vector2(8f, 0f);
+                    componentGui.ControlsContainerWidget.AddChildren(e.Boton);
+                    estados[componentGui] = e;
+                }
+
+                ComponentLocomotion loc = jugador.ComponentLocomotion;
+                double ahora = Time.RealTime;
+                if (e.Boton.IsClicked && ahora - e.UltimoToque > 0.25)
+                {
+                    e.UltimoToque = ahora;
+                    e.Corriendo = !e.Corriendo;
+                    e.Boton.Text = e.Corriendo ? TextoEncendido : TextoApagado;
+                    if (e.Corriendo) e.VelocidadBase = loc.WalkSpeed;
+                    else loc.WalkSpeed = e.VelocidadBase;
+                }
+                if (e.Corriendo) loc.WalkSpeed = e.VelocidadBase * Multiplicador;
+            }
+            catch (Exception ex)
+            {
+                desactivado = true;
+                Log.Warning("BotonCorrer desactivado por error: " + ex);
+            }
         }
     }
 }
