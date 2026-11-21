@@ -296,6 +296,23 @@ namespace Game
                 Estado e;
                 if (!estados.TryGetValue(componentGui, out e))
                 {
+                    // Al morir el jugador reaparece con un ComponentGui nuevo, pero el contenedor de
+                    // widgets es el mismo: quitamos el panel y la barra viejos para que no se encimen.
+                    ContainerWidget contenedor = componentGui.ControlsContainerWidget;
+                    List<ComponentGui> viejos = new List<ComponentGui>();
+                    foreach (KeyValuePair<ComponentGui, Estado> par in estados)
+                    {
+                        if (par.Key == componentGui) continue;
+                        Estado v = par.Value;
+                        bool mismo = (v.Panel != null && v.Panel.ParentWidget == contenedor)
+                            || (v.Caja != null && v.Caja.ParentWidget == contenedor);
+                        if (!mismo) continue;
+                        if (v.Panel != null) contenedor.RemoveChildren(v.Panel);
+                        if (v.Caja != null) contenedor.RemoveChildren(v.Caja);
+                        viejos.Add(par.Key);
+                    }
+                    for (int i = 0; i < viejos.Count; i++) estados.Remove(viejos[i]);
+
                     e = new Estado();
                     e.Panel = new StackPanelWidget();
                     e.Panel.Direction = LayoutDirection.Vertical;
