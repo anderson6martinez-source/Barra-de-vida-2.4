@@ -59,14 +59,16 @@ namespace Game
 
         // ---- panel lateral del animal golpeado ----
         const float SegundosPanel = 30f;    // el panel dura 30 s tras el ultimo golpe a ese animal
-        const float AnchoPanel = 120f;
-        const float AltoPanel = 42f;
+        const float AnchoPanel = 200f;
+        const float AltoPanel = 76f;
+        const float AltoBarraPanel = 7f;    // grosor de la barrita fina
 
         class Panel
         {
             public CanvasWidget Caja;
             public LabelWidget Nombre;
             public LabelWidget Vida;
+            public RectangleWidget Relleno;
             public ComponentCreature Objetivo;
             public double Fin;
             public string UltimoTexto;
@@ -166,17 +168,36 @@ namespace Game
                     StackPanelWidget col = new StackPanelWidget();
                     col.Direction = LayoutDirection.Vertical;
                     col.HorizontalAlignment = WidgetAlignment.Center;
-                    col.VerticalAlignment = WidgetAlignment.Center;
+                    col.VerticalAlignment = WidgetAlignment.Near;
+                    col.Margin = new Vector2(0f, 6f);
                     p.Nombre = new LabelWidget();
-                    p.Nombre.FontScale = 0.7f;
+                    p.Nombre.FontScale = 1.0f;
                     p.Nombre.Color = Color.White;
                     p.Nombre.HorizontalAlignment = WidgetAlignment.Center;
                     p.Vida = new LabelWidget();
-                    p.Vida.FontScale = 0.7f;
+                    p.Vida.FontScale = 1.0f;
                     p.Vida.HorizontalAlignment = WidgetAlignment.Center;
                     col.AddChildren(p.Nombre);
                     col.AddChildren(p.Vida);
                     p.Caja.AddChildren(col);
+
+                    // barrita fina abajo: fondo oscuro + relleno que cambia de ancho y color
+                    float anchoBarra = AnchoPanel - 16f;
+                    RectangleWidget fondoBarra = new RectangleWidget();
+                    fondoBarra.Size = new Vector2(anchoBarra, AltoBarraPanel);
+                    fondoBarra.HorizontalAlignment = WidgetAlignment.Near;
+                    fondoBarra.VerticalAlignment = WidgetAlignment.Near;
+                    fondoBarra.Margin = new Vector2(8f, AltoPanel - AltoBarraPanel - 8f);
+                    fondoBarra.FillColor = new Color((byte)40, (byte)40, (byte)40, (byte)200);
+                    fondoBarra.OutlineColor = Color.Transparent;
+                    p.Caja.AddChildren(fondoBarra);
+                    p.Relleno = new RectangleWidget();
+                    p.Relleno.Size = new Vector2(anchoBarra, AltoBarraPanel);
+                    p.Relleno.HorizontalAlignment = WidgetAlignment.Near;
+                    p.Relleno.VerticalAlignment = WidgetAlignment.Near;
+                    p.Relleno.Margin = new Vector2(8f, AltoPanel - AltoBarraPanel - 8f);
+                    p.Relleno.OutlineColor = Color.Transparent;
+                    p.Caja.AddChildren(p.Relleno);
                     contenedor.AddChildren(p.Caja);
                 }
 
@@ -199,6 +220,8 @@ namespace Game
                     p.Vida.Text = vidaTxt;
                     Color colorVida = ColorVida(v, (byte)255);
                     p.Vida.Color = colorVida;
+                    p.Relleno.Size = new Vector2(MathUtils.Max((AnchoPanel - 16f) * v, 1f), AltoBarraPanel);
+                    p.Relleno.FillColor = colorVida;
                 }
             }
             catch (Exception ex)
