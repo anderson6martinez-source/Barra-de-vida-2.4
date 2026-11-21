@@ -92,8 +92,6 @@ namespace Game
         static bool panelDesactivado;
         static System.Reflection.MemberInfo miembroObjetivo;
         static bool miembroBuscado;
-        double ultimoAtaqueJugador = -100;
-        ComponentCreature jugadorAtacante;
 
         static readonly string[] NombresCampeon = { "Rojo", "Amarillo", "Verde", "Azul", "Morado", "Dorado", "Negro", "Blanco", "Naranja", "Jefe" };
         static readonly Color[] ColoresCampeonUI =
@@ -333,7 +331,6 @@ namespace Game
             try
             {
                 ComponentCreature atq = attackment.Attacker.FindComponent<ComponentCreature>(false);
-                if (atq is ComponentPlayer) { jugadorAtacante = atq; ultimoAtaqueJugador = Time.RealTime; }
                 RegistrarGolpe(atq, CriaturaDe((object)attackment));
             }
             catch (Exception ex)
@@ -408,8 +405,6 @@ namespace Game
                 if (vidaPrevia.TryGetValue(c, out anterior) && vida < anterior - 0.0001f)
                 {
                     ultimoGolpe[c] = ahora;
-                    if (ahora - ultimoAtaqueJugador < 1.0 && jugadorAtacante != null && !(c is ComponentPlayer))
-                        RegistrarGolpe(jugadorAtacante, c);
                 }
                 vidaPrevia[c] = vida;
                 double golpe;
