@@ -76,6 +76,8 @@ namespace Game
         static bool panelDesactivado;
         static System.Reflection.MemberInfo miembroObjetivo;
         static bool miembroBuscado;
+        double ultimoAtaqueJugador = -100;
+        ComponentCreature jugadorAtacante;
 
         // saca la criatura golpeada del Attackment (el campo "Target" cambia de tipo segun la version)
         static ComponentCreature CriaturaDe(object ataque)
@@ -153,6 +155,9 @@ namespace Game
                     p.Caja.IsHitTestVisible = false;
 
                     RectangleWidget fondo = new RectangleWidget();
+                    fondo.Size = new Vector2(AnchoPanel, AltoPanel);
+                    fondo.HorizontalAlignment = WidgetAlignment.Near;
+                    fondo.VerticalAlignment = WidgetAlignment.Near;
                     fondo.FillColor = new Color((byte)0, (byte)0, (byte)0, (byte)150);
                     fondo.OutlineColor = new Color((byte)255, (byte)255, (byte)255, (byte)90);
                     fondo.OutlineThickness = 1f;
@@ -209,7 +214,9 @@ namespace Game
             if (attackment == null || attackment.Attacker == null) return;
             try
             {
-                RegistrarGolpe(attackment.Attacker.FindComponent<ComponentCreature>(false), CriaturaDe((object)attackment));
+                ComponentCreature atq = attackment.Attacker.FindComponent<ComponentCreature>(false);
+                if (atq is ComponentPlayer) { jugadorAtacante = atq; ultimoAtaqueJugador = Time.RealTime; }
+                RegistrarGolpe(atq, CriaturaDe((object)attackment));
             }
             catch (Exception ex)
             {
@@ -279,7 +286,12 @@ namespace Game
                 if (!MostrarAlJugador && c.Entity.FindComponent<ComponentPlayer>(false) != null) continue;
 
                 float anterior;
-                if (vidaPrevia.TryGetValue(c, out anterior) && vida < anterior - 0.0001f) ultimoGolpe[c] = ahora;
+                if (vidaPrevia.TryGetValue(c, out anterior) && vida < anterior - 0.0001f)
+                {
+                    ultimoGolpe[c] = ahora;
+                    if (ahora - ultimoAtaqueJugador < 1.0 && jugadorAtacante != null && !(c is ComponentPlayer))
+                        RegistrarGolpe(jugadorAtacante, c);
+                }
                 vidaPrevia[c] = vida;
                 double golpe;
                 bool recienGolpeada = ultimoGolpe.TryGetValue(c, out golpe) && ahora - golpe < SegundosOpaca;
