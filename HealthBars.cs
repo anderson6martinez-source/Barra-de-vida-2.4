@@ -32,6 +32,14 @@ namespace Game
         readonly Dictionary<ComponentCreature, float> vidaPrevia = new Dictionary<ComponentCreature, float>();
         readonly Dictionary<ComponentCreature, double> ultimoGolpe = new Dictionary<ComponentCreature, double>();
         double proximaLimpieza;
+        SubsystemTime tiempoMundo;
+
+        // al dormir el juego acelera el tiempo: las criaturas se mueven a lo loco y las barras con ellas.
+        // Mientras el tiempo va acelerado se ocultan las barras y el panel.
+        bool Durmiendo()
+        {
+            return tiempoMundo != null && tiempoMundo.GameTimeFactor > 1.01f;
+        }
 
         public override void __ModInitialize()
         {
@@ -50,6 +58,7 @@ namespace Game
             List<SubsystemCreatureSpawn.CreatureType> creatureTypes)
         {
             creaturas = subsystemCreatureSpawn;
+            tiempoMundo = subsystemCreatureSpawn.Project.FindSubsystem<SubsystemTime>(false);
             vidaPrevia.Clear();
             paneles.Clear();
             ultimoGolpe.Clear();
@@ -58,9 +67,10 @@ namespace Game
         static bool desactivado;
 
         // ---- panel lateral del animal golpeado ----
-        const float SegundosPanel = 30f;    // el panel dura 30 s tras el ultimo golpe a ese animal
+        const float SegundosPanel = 10f;    // el panel dura 10 s tras el ultimo golpe a ese animal
         const float AnchoPanel = 200f;
         const float AltoPanel = 76f;
+        const float AltoPanelCampeon = 98f; // con la linea extra del color del campeon
         const float AltoBarraPanel = 7f;    // grosor de la barrita fina
 
         class Panel
@@ -69,6 +79,10 @@ namespace Game
             public LabelWidget Nombre;
             public LabelWidget Vida;
             public RectangleWidget Relleno;
+            public RectangleWidget Fondo;
+            public RectangleWidget FondoBarra;
+            public LabelWidget Campeon;
+            public int UltimoTipo = -2;
             public ComponentCreature Objetivo;
             public double Fin;
             public string UltimoTexto;
@@ -80,6 +94,50 @@ namespace Game
         static bool miembroBuscado;
         double ultimoAtaqueJugador = -100;
         ComponentCreature jugadorAtacante;
+
+        static readonly string[] NombresCampeon = { "Rojo", "Amarillo", "Verde", "Azul", "Morado", "Dorado" };
+        static readonly Color[] ColoresCampeonUI =
+        {
+            new Color((byte)235, (byte)60, (byte)60, (byte)255),
+            new Color((byte)255, (byte)230, (byte)60, (byte)255),
+            new Color((byte)80, (byte)255, (byte)80, (byte)255),
+            new Color((byte)90, (byte)140, (byte)255, (byte)255),
+            new Color((byte)190, (byte)90, (byte)240, (byte)255),
+            new Color((byte)255, (byte)205, (byte)70, (byte)255)
+        };
+        static readonly List<System.Reflection.MethodInfo> metodosTipo = new List<System.Reflection.MethodInfo>();
+        static bool tipoBuscado;
+
+        // pregunta a Campeones.cs (criaturas) y a Zombies.cs (zombis) de que color es el campeon; -1 si no lo es
+        static int TipoCampeon(Entity e)
+        {
+            try
+            {
+                if (!tipoBuscado)
+                {
+                    tipoBuscado = true;
+                    string[] clases = { "GiganteCode.CampeonesLoader", "Game.ZombiesLoader" };
+                    foreach (System.Reflection.Assembly ens in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        foreach (string nombreCls in clases)
+                        {
+                            Type tipoCls = ens.GetType(nombreCls, false);
+                            if (tipoCls == null) continue;
+                            System.Reflection.MethodInfo m = tipoCls.GetMethod("TipoCampeon",
+                                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                            if (m != null) metodosTipo.Add(m);
+                        }
+                    }
+                }
+                for (int i = 0; i < metodosTipo.Count; i++)
+                {
+                    int r = (int)metodosTipo[i].Invoke(null, new object[] { e });
+                    if (r >= 0) return r;
+                }
+                return -1;
+            }
+            catch { return -1; }
+        }
 
         // saca la criatura golpeada del Attackment (el campo "Target" cambia de tipo segun la version)
         static ComponentCreature CriaturaDe(object ataque)
@@ -122,6 +180,7 @@ namespace Game
             p.Objetivo = objetivo;
             p.Fin = Time.RealTime + SegundosPanel;
             p.UltimoTexto = null;
+            p.UltimoTipo = -2;
         }
 
         public override void GuiDraw(ComponentGui componentGui, Camera camera, int drawOrder)
@@ -164,6 +223,7 @@ namespace Game
                     fondo.OutlineColor = new Color((byte)255, (byte)255, (byte)255, (byte)90);
                     fondo.OutlineThickness = 1f;
                     p.Caja.AddChildren(fondo);
+                    p.Fondo = fondo;
 
                     StackPanelWidget col = new StackPanelWidget();
                     col.Direction = LayoutDirection.Vertical;
@@ -178,6 +238,11 @@ namespace Game
                     p.Vida.FontScale = 1.0f;
                     p.Vida.HorizontalAlignment = WidgetAlignment.Center;
                     col.AddChildren(p.Nombre);
+                    p.Campeon = new LabelWidget();
+                    p.Campeon.FontScale = 0.8f;
+                    p.Campeon.HorizontalAlignment = WidgetAlignment.Center;
+                    p.Campeon.IsVisible = false;
+                    col.AddChildren(p.Campeon);
                     col.AddChildren(p.Vida);
                     p.Caja.AddChildren(col);
 
@@ -191,6 +256,7 @@ namespace Game
                     fondoBarra.FillColor = new Color((byte)40, (byte)40, (byte)40, (byte)200);
                     fondoBarra.OutlineColor = Color.Transparent;
                     p.Caja.AddChildren(fondoBarra);
+                    p.FondoBarra = fondoBarra;
                     p.Relleno = new RectangleWidget();
                     p.Relleno.Size = new Vector2(anchoBarra, AltoBarraPanel);
                     p.Relleno.HorizontalAlignment = WidgetAlignment.Near;
@@ -203,9 +269,34 @@ namespace Game
 
                 ComponentCreature c = p.Objetivo;
                 bool visible = c != null && c.ComponentHealth != null && c.ComponentHealth.Health > 0f
-                    && Time.RealTime < p.Fin;
+                    && Time.RealTime < p.Fin && !Durmiendo();
                 p.Caja.IsVisible = visible;
                 if (!visible) return;
+
+                // color del campeon (solo si existe Campeones.cs, juego 2.4)
+                int tipo = TipoCampeon(c.Entity);
+                if (tipo != p.UltimoTipo)
+                {
+                    p.UltimoTipo = tipo;
+                    bool esCampeon = tipo >= 0 && tipo < NombresCampeon.Length;
+                    float alto = esCampeon ? AltoPanelCampeon : AltoPanel;
+                    Color borde = new Color((byte)255, (byte)255, (byte)255, (byte)90);
+                    if (esCampeon)
+                    {
+                        Color cc = ColoresCampeonUI[tipo];
+                        p.Campeon.Text = "Campeon: " + NombresCampeon[tipo];
+                        p.Campeon.Color = cc;
+                        borde = cc;
+                    }
+                    p.Campeon.IsVisible = esCampeon;
+                    p.Caja.Size = new Vector2(AnchoPanel, alto);
+                    p.Fondo.Size = new Vector2(AnchoPanel, alto);
+                    p.Fondo.OutlineColor = borde;
+                    p.Fondo.OutlineThickness = esCampeon ? 2f : 1f;
+                    Vector2 mb = new Vector2(8f, alto - AltoBarraPanel - 8f);
+                    p.FondoBarra.Margin = mb;
+                    p.Relleno.Margin = mb;
+                }
 
                 float v = MathUtils.Clamp(c.ComponentHealth.Health, 0f, 1f);
                 float max = c.ComponentHealth.AttackResilience;
@@ -271,6 +362,7 @@ namespace Game
 
         void Dibujar(Camera camera)
         {
+            if (Durmiendo()) return;
 
             Matrix vista = camera.ViewMatrix;
             Vector3 derecha = new Vector3(vista.M11, vista.M21, vista.M31);
